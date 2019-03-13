@@ -81,6 +81,7 @@ func (s *SqlBackend) Create(model interface{}) (int64, error) {
 	values := []interface{}{}
 	t := reflect.TypeOf(model).Elem()
 	v := reflect.Indirect(reflect.ValueOf(model))
+	var idv reflect.Value
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		name := strings.ToLower(field.Name)
@@ -88,6 +89,8 @@ func (s *SqlBackend) Create(model interface{}) (int64, error) {
 			fields = append(fields, name)
 			vstubs = append(vstubs, "?")
 			values = append(values, v.Field(i).Interface())
+		} else {
+			idv = v.Field(i)
 		}
 	}
 	fs := "(" + strings.Join(fields, ",") + ")"
@@ -97,11 +100,12 @@ func (s *SqlBackend) Create(model interface{}) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	lastInsertId, err := res.LastInsertId()
+	id, err := res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
-	return lastInsertId, nil
+	idv.SetInt(id)
+	return id, nil
 }
 
 func (s *SqlBackend) Update(id int64, model interface{}) error {
@@ -133,10 +137,10 @@ func (s *SqlBackend) Get(key int64, dest interface{}) error {
 	if err := s.IsReady(); err != nil {
 		return err
 	}
-	fields := []string{}
-	values := []interface{}{}
 	t := reflect.TypeOf(dest).Elem()
 	v := reflect.Indirect(reflect.ValueOf(dest))
+	values := []interface{}{}
+	fields := []string{}
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		name := strings.ToLower(field.Name)
@@ -203,4 +207,15 @@ func (s *SqlBackend) List(list interface{}) error {
 		return err
 	}
 	return nil
+}
+
+func StructValues(v reflect.Value, cols []string) []interface{} {
+	vv := []interface{}{}
+	for _, f := range cols {
+		fv := v.FieldByNameFunc(func(s string) bool {
+			return strings.ToLower(s) == f
+		})
+		vv = append(vv, fv.Addr().Interface())
+	}
+	return vv
 }

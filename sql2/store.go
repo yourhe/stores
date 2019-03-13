@@ -14,7 +14,7 @@ func (s *SqlBackend) Write(key string, model interface{}) error {
 		return s.Delete(id)
 	}
 	if key == "" && model != nil {
-		_, err := s.Create(model) //QUETIONS:id自增情况下，不应忽略id
+		_, err := s.Create(model)
 		return err
 	}
 	if key != "" && model != nil {
