@@ -1,6 +1,7 @@
 package stores // import "github.com/yourhe/stores"
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -16,6 +17,11 @@ type Store interface {
 	ReadAll(interface{}) error //out set value interface{} like &[]users is array struct
 	Keys(...string) []string   //out set value interface{} like &[]users is array struct
 	Perfix() string
+}
+
+type SqlExecutor interface {
+	Exec(string, ...interface{}) (sql.Result, error)
+	Query(string, ...interface{}) (*sql.Rows, error)
 }
 
 var NotFoundError = errors.New("key not found")
