@@ -3,6 +3,7 @@ package sql2
 // "github.com/jmoiron/sqlx"
 
 import (
+	"database/sql"
 	"errors"
 	"strconv"
 )
@@ -43,4 +44,12 @@ func (s *SqlBackend) Keys(strs ...string) []string {
 
 func (s *SqlBackend) Perfix() string {
 	panic("not implemented")
+}
+
+func (s *SqlBackend) Exec(query string, args ...interface{}) (sql.Result, error) {
+	return s.DB.Exec(query, args...)
+}
+
+func (s *SqlBackend) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return s.DB.Query(query, args...)
 }
