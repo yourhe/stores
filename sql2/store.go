@@ -17,7 +17,7 @@ func (s *SqlBackend) Write(key string, model interface{}) error {
 		return s.Delete(id)
 	}
 	if key == "" && model != nil {
-		id, err := s.Create(model)
+		id, err := s.Insert(model)
 		if err != nil {
 			return err
 		}
