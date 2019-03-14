@@ -76,27 +76,16 @@ func (s *SqlBackend) Create(model interface{}) (int64, error) {
 	if err := s.IsReady(); err != nil {
 		return 0, err
 	}
-	fields := []string{}
-	vstubs := []string{}
-	values := []interface{}{}
+	//TODO:类型判断函数
 	t := reflect.TypeOf(model).Elem()
 	v := reflect.Indirect(reflect.ValueOf(model))
-	var idv reflect.Value
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		name := strings.ToLower(field.Name)
-		if name != s.pk {
-			fields = append(fields, name)
-			vstubs = append(vstubs, "?")
-			values = append(values, v.Field(i).Interface())
-		} else {
-			idv = v.Field(i)
-		}
-	}
-	fs := "(" + strings.Join(fields, ",") + ")"
-	vs := "(" + strings.Join(vstubs, ",") + ")"
-	query := "INSERT INTO " + s.table + " " + fs + " VALUES " + vs
-	res, err := s.DB.Exec(query, values...)
+	ff := TypeFields(t)
+	ff = StringFilter(ff, func(f string) bool {
+		return strings.ToLower(f) != s.pk
+	})
+	vv := ValuesByFields(v, ff)
+	query := InsertSQL(s.table, StringMap(ff, strings.ToLower))
+	res, err := s.DB.Exec(query, vv...)
 	if err != nil {
 		return 0, err
 	}
@@ -104,7 +93,6 @@ func (s *SqlBackend) Create(model interface{}) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	idv.SetInt(id)
 	return id, nil
 }
 
@@ -112,21 +100,15 @@ func (s *SqlBackend) Update(id int64, model interface{}) error {
 	if err := s.IsReady(); err != nil {
 		return err
 	}
-	stubs := []string{}
-	values := []interface{}{}
 	t := reflect.TypeOf(model).Elem()
 	v := reflect.Indirect(reflect.ValueOf(model))
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		name := strings.ToLower(field.Name)
-		if name != s.pk {
-			stubs = append(stubs, name+"=?")
-			values = append(values, v.Field(i).Interface())
-		}
-	}
-	vs := strings.Join(stubs, ",")
-	query := "UPDATE " + s.table + " SET " + vs + " where " + s.pk + "=" + strconv.FormatInt(id, 10)
-	_, err := s.DB.Exec(query, values...)
+	ff := TypeFields(t)
+	ff = StringFilter(ff, func(f string) bool {
+		return strings.ToLower(f) != s.pk
+	})
+	vv := ValuesByFields(v, ff)
+	query := UpdateSQL(s.table, StringMap(ff, strings.ToLower)) + " where " + s.pk + "=" + strconv.FormatInt(id, 10)
+	_, err := s.DB.Exec(query, vv...)
 	if err != nil {
 		return err
 	}
@@ -139,17 +121,10 @@ func (s *SqlBackend) Get(key int64, dest interface{}) error {
 	}
 	t := reflect.TypeOf(dest).Elem()
 	v := reflect.Indirect(reflect.ValueOf(dest))
-	values := []interface{}{}
-	fields := []string{}
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		name := strings.ToLower(field.Name)
-		fields = append(fields, name)
-		values = append(values, v.Field(i).Addr().Interface()) //获取结构体的字段指针
-	}
-	fs := strings.Join(fields, ",")
-	query := "select " + fs + " from " + s.table + " where " + s.pk + " = ?"
-	err := s.DB.QueryRow(query, key).Scan(values...)
+	ff := TypeFields(t)
+	pp := PointersByFields(v, ff)
+	query := SelectSQL(s.table, StringMap(ff, strings.ToLower)) + " where " + s.pk + " = ?"
+	err := s.DB.QueryRow(query, key).Scan(pp...)
 	return err
 }
 
@@ -164,44 +139,24 @@ func (s *SqlBackend) Delete(key int64) error {
 	return nil
 }
 
-func getStructFields(t reflect.Type) []string {
-	ss := []string{}
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		name := strings.ToLower(f.Name)
-		ss = append(ss, name)
-	}
-	return ss
-}
-
-func newStructValuePtrs(t reflect.Type) (reflect.Value, []interface{}) {
-	vptr := reflect.New(t)
-	v := reflect.Indirect(vptr)
-	vv := []interface{}{}
-	for i := 0; i < t.NumField(); i++ {
-		vv = append(vv, v.Field(i).Addr().Interface())
-	}
-	return vptr, vv
-}
-
 func (s *SqlBackend) List(list interface{}) error {
 	if err := s.IsReady(); err != nil {
 		return err
 	}
 	dest := reflect.ValueOf(list).Elem()
 	t := reflect.TypeOf(list).Elem().Elem().Elem()
-	fields := getStructFields(t)
-	fs := strings.Join(fields, ",")
-	query := "select " + fs + " from " + s.table
+	ff := TypeFields(t)
+	query := SelectSQL(s.table, StringMap(ff, strings.ToLower))
 	rows, err := s.DB.Query(query)
 	defer rows.Close()
 	for rows.Next() {
-		elem, vs := newStructValuePtrs(t)
-		err := rows.Scan(vs...)
-		dest.Set(reflect.Append(dest, elem))
+		vptr := reflect.New(t)
+		pp := PointersByFields(reflect.Indirect(vptr), ff)
+		err := rows.Scan(pp...)
 		if err != nil {
 			return err
 		}
+		dest.Set(reflect.Append(dest, vptr))
 	}
 	if err != nil {
 		return err
@@ -209,13 +164,65 @@ func (s *SqlBackend) List(list interface{}) error {
 	return nil
 }
 
-func StructValues(v reflect.Value, cols []string) []interface{} {
+func InsertSQL(table string, ff []string) string {
+	stubs := StringMap(ff, func(f string) string {
+		return "?"
+	})
+	fs := "(" + strings.Join(ff, ",") + ")"
+	vs := "(" + strings.Join(stubs, ",") + ")"
+	return "INSERT INTO " + table + " " + fs + " VALUES " + vs
+}
+
+func UpdateSQL(table string, ff []string) string {
+	stubs := StringMap(ff, func(f string) string {
+		return f + "=?"
+	})
+	return "UPDATE " + table + " SET " + strings.Join(stubs, ",")
+}
+
+func SelectSQL(table string, ff []string) string {
+	fs := strings.Join(ff, ",")
+	return "select " + fs + " from " + table
+}
+
+func TypeFields(t reflect.Type) []string {
+	ff := []string{}
+	for i := 0; i < t.NumField(); i++ {
+		ff = append(ff, t.Field(i).Name)
+	}
+	return ff
+}
+
+func StringFilter(ss []string, match func(string) bool) []string {
+	nss := []string{}
+	for _, s := range ss {
+		if match(s) {
+			nss = append(nss, s)
+		}
+	}
+	return nss
+}
+
+func StringMap(ss []string, mapper func(string) string) []string {
+	nss := []string{}
+	for _, s := range ss {
+		nss = append(nss, mapper(s))
+	}
+	return nss
+}
+
+func ValuesByFields(v reflect.Value, ff []string) []interface{} {
 	vv := []interface{}{}
-	for _, f := range cols {
-		fv := v.FieldByNameFunc(func(s string) bool {
-			return strings.ToLower(s) == f
-		})
-		vv = append(vv, fv.Addr().Interface())
+	for _, f := range ff {
+		vv = append(vv, v.FieldByName(f).Interface())
+	}
+	return vv
+}
+
+func PointersByFields(v reflect.Value, ff []string) []interface{} {
+	vv := []interface{}{}
+	for _, f := range ff {
+		vv = append(vv, v.FieldByName(f).Addr().Interface())
 	}
 	return vv
 }
