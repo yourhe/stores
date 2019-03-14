@@ -84,14 +84,14 @@ func (s *SqlBackend) Insert(model interface{}) (int64, error) {
 	if err := s.IsReady(); err != nil {
 		return 0, err
 	}
-	t := reflect.TypeOf(model).Elem()
-	v := reflect.Indirect(reflect.ValueOf(model))
-	ff := ExtractFieldsNames(t)
-	ff = FilterStrings(ff, func(f string) bool {
+	modelType := reflect.TypeOf(model).Elem()
+	dest := reflect.Indirect(reflect.ValueOf(model))
+	fnames := ExtractFieldsNames(modelType)
+	fnames = FilterStrings(fnames, func(f string) bool {
 		return !s.IsPK(f)
 	})
-	args := ValuesByFields(v, ff)
-	query := BuildInsertSQL(s.table, MapStrings(ff, strings.ToLower))
+	args := ValuesByFields(dest, fnames)
+	query := BuildInsertSQL(s.table, MapStrings(fnames, strings.ToLower))
 	res, err := s.DB.Exec(query, args...)
 	if err != nil {
 		return 0, err
@@ -108,14 +108,14 @@ func (s *SqlBackend) Update(id int64, model interface{}) error {
 	if err := s.IsReady(); err != nil {
 		return err
 	}
-	t := reflect.TypeOf(model).Elem()
-	v := reflect.Indirect(reflect.ValueOf(model))
-	ff := ExtractFieldsNames(t)
-	ff = FilterStrings(ff, func(f string) bool {
+	modelType := reflect.TypeOf(model).Elem()
+	dest := reflect.Indirect(reflect.ValueOf(model))
+	fnames := ExtractFieldsNames(modelType)
+	fnames = FilterStrings(fnames, func(f string) bool {
 		return !s.IsPK(f)
 	})
-	args := ValuesByFields(v, ff)
-	query := BuildUpdateSQL(s.table, MapStrings(ff, strings.ToLower)) + " where " + s.pk + "=" + strconv.FormatInt(id, 10)
+	args := ValuesByFields(dest, fnames)
+	query := BuildUpdateSQL(s.table, MapStrings(fnames, strings.ToLower)) + " where " + s.pk + "=" + strconv.FormatInt(id, 10)
 	_, err := s.DB.Exec(query, args...)
 	if err != nil {
 		return err
@@ -124,15 +124,15 @@ func (s *SqlBackend) Update(id int64, model interface{}) error {
 }
 
 // Get 获取对象，model参数是结构体指针，如 &Sth{}
-func (s *SqlBackend) Get(key int64, dest interface{}) error {
+func (s *SqlBackend) Get(key int64, model interface{}) error {
 	if err := s.IsReady(); err != nil {
 		return err
 	}
-	t := reflect.TypeOf(dest).Elem()
-	v := reflect.Indirect(reflect.ValueOf(dest))
-	ff := ExtractFieldsNames(t)
-	outs := PointersByFields(v, ff)
-	query := BuildSelectSQL(s.table, MapStrings(ff, strings.ToLower)) + " where " + s.pk + " = ?"
+	modelType := reflect.TypeOf(model).Elem()
+	dest := reflect.Indirect(reflect.ValueOf(model))
+	fnames := ExtractFieldsNames(modelType)
+	outs := PointersByFields(dest, fnames)
+	query := BuildSelectSQL(s.table, MapStrings(fnames, strings.ToLower)) + " where " + s.pk + " = ?"
 	err := s.DB.QueryRow(query, key).Scan(outs...)
 	return err
 }
@@ -149,20 +149,20 @@ func (s *SqlBackend) Delete(key int64) error {
 	return nil
 }
 
-// List 获取对象集合，list参数必须是结构体指针切片指针，如 *[]*Sth{}
+// List 获取对象集合，list参数必须是结构体指针切片指针，如 &[]*Sth{}
 func (s *SqlBackend) List(list interface{}) error {
 	if err := s.IsReady(); err != nil {
 		return err
 	}
-	dest := reflect.ValueOf(list).Elem()
-	t := reflect.TypeOf(list).Elem().Elem().Elem()
-	ff := ExtractFieldsNames(t)
-	query := BuildSelectSQL(s.table, MapStrings(ff, strings.ToLower))
+	dest := reflect.ValueOf(list).Elem()                   //切片值(非指针)
+	modelType := reflect.TypeOf(list).Elem().Elem().Elem() //切片成员类型(非指针)
+	fnames := ExtractFieldsNames(modelType)
+	query := BuildSelectSQL(s.table, MapStrings(fnames, strings.ToLower))
 	rows, err := s.DB.Query(query)
 	defer rows.Close()
 	for rows.Next() {
-		vptr := reflect.New(t)
-		outs := PointersByFields(reflect.Indirect(vptr), ff)
+		vptr := reflect.New(modelType)
+		outs := PointersByFields(reflect.Indirect(vptr), fnames)
 		err := rows.Scan(outs...)
 		if err != nil {
 			return err
