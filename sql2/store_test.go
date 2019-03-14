@@ -42,6 +42,9 @@ func Test_IStore(t *testing.T) {
 	}
 	err = sqlStore.Write("", r)
 	check(err)
+	if r.ID != 1 {
+		t.Fatalf("write new fail")
+	}
 	rr := []*ReportDemo{}
 	_ = sqlStore.ReadAll(&rr)
 	// check(err)

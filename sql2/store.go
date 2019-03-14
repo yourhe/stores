@@ -5,7 +5,9 @@ package sql2
 import (
 	"database/sql"
 	"errors"
+	"reflect"
 	"strconv"
+	"strings"
 )
 
 func (s *SqlBackend) Write(key string, model interface{}) error {
@@ -15,8 +17,16 @@ func (s *SqlBackend) Write(key string, model interface{}) error {
 		return s.Delete(id)
 	}
 	if key == "" && model != nil {
-		_, err := s.Create(model)
-		return err
+		id, err := s.Create(model)
+		if err != nil {
+			return err
+		}
+		v := reflect.Indirect(reflect.ValueOf(model))
+		idv := v.FieldByNameFunc(func(f string) bool {
+			return strings.ToLower(f) == s.pk
+		})
+		idv.SetInt(id)
+		return nil
 	}
 	if key != "" && model != nil {
 		//修改
