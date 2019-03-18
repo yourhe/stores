@@ -63,3 +63,44 @@ func (s *SqlBackend) Exec(query string, args ...interface{}) (sql.Result, error)
 func (s *SqlBackend) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	return s.DB.Query(query, args...)
 }
+
+func (s *SqlBackend) Find(q interface{}, to interface{}) error {
+	if err := s.IsReady(); err != nil {
+		return err
+	}
+	query := reflect.ValueOf(q).Interface().(string)
+	dest := reflect.ValueOf(to).Elem()                   //切片值(非指针)
+	modelType := reflect.TypeOf(to).Elem().Elem().Elem() //切片成员类型(非指针)
+	fnames := ExtractFieldsNames(modelType)
+	rows, err := s.DB.Query(query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+	fnames = FilterStrings(fnames, func(f string) bool {
+		_f := strings.ToLower(f)
+		for _, c := range cols {
+			if c == _f {
+				return true
+			}
+		}
+		return false
+	})
+	for rows.Next() {
+		vptr := reflect.New(modelType)
+		outs := PointersByFields(reflect.Indirect(vptr), fnames)
+		err := rows.Scan(outs...)
+		if err != nil {
+			return err
+		}
+		dest.Set(reflect.Append(dest, vptr))
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}

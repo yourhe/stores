@@ -35,7 +35,6 @@ func Test_IStore(t *testing.T) {
 	check(err)
 	defer sqlEx.Exec(DROP_SQL)
 	var sqlStore stores.Store = sql
-
 	r := &ReportDemo{
 		Name:    "n1",
 		Content: "n1",
@@ -63,6 +62,12 @@ func Test_IStore(t *testing.T) {
 	_ = sqlStore.Read("1", nnr)
 	if nnr.ID != 1 || nnr.Name != "new" || nnr.Content != "new" {
 		t.Fatal("update fail")
+	}
+	var sqlQueryer stores.Queryer = sql
+	li := []*ReportDemo{}
+	_ = sqlQueryer.Find("select id,name from report_demo where name='new'", &li)
+	if len(li) != 1 {
+		t.Fatal("find fail")
 	}
 	err = sqlStore.Write("1", nil)
 	check(err)
