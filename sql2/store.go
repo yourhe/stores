@@ -3,8 +3,11 @@ package sql2
 // "github.com/jmoiron/sqlx"
 
 import (
+	"database/sql"
 	"errors"
+	"reflect"
 	"strconv"
+	"strings"
 )
 
 func (s *SqlBackend) Write(key string, model interface{}) error {
@@ -14,8 +17,16 @@ func (s *SqlBackend) Write(key string, model interface{}) error {
 		return s.Delete(id)
 	}
 	if key == "" && model != nil {
-		_, err := s.Create(model) //QUETIONS:id自增情况下，不应忽略id
-		return err
+		id, err := s.Insert(model)
+		if err != nil {
+			return err
+		}
+		v := reflect.Indirect(reflect.ValueOf(model))
+		idv := v.FieldByNameFunc(func(f string) bool {
+			return strings.ToLower(f) == s.pk
+		})
+		idv.SetInt(id)
+		return nil
 	}
 	if key != "" && model != nil {
 		//修改
@@ -43,4 +54,12 @@ func (s *SqlBackend) Keys(strs ...string) []string {
 
 func (s *SqlBackend) Perfix() string {
 	panic("not implemented")
+}
+
+func (s *SqlBackend) Exec(query string, args ...interface{}) (sql.Result, error) {
+	return s.DB.Exec(query, args...)
+}
+
+func (s *SqlBackend) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return s.DB.Query(query, args...)
 }

@@ -40,7 +40,7 @@ func Test_Get(t *testing.T) {
 		Name:    "n1",
 		Content: "n1",
 	}
-	id, _ := sql.Create(r)
+	id, _ := sql.Insert(r)
 	// check(err)
 	if id != 1 {
 		t.Fatal("create fail")
