@@ -27,15 +27,15 @@ func Test_IStore(t *testing.T) {
 	db, _ := NewDB(os.Getenv("SQL_TYPE"), os.Getenv("SQL_CONNECTION"))
 
 	sql, _ := NewSqlBackend(db)
-	sql.SetPKField("id")
-	sql.SetTable("report_demo")
 
 	var sqlEx stores.SqlExecutor = sql
-	_, err = sqlEx.Exec(CREATE_SQL)
+	_, err = sqlEx.Exec(CREATE_DEMO1_SQL)
 	check(err)
-	defer sqlEx.Exec(DROP_SQL)
+	defer sqlEx.Exec(DROP_DEMO1_SQL)
+	sql.SetPKField("id")
+	sql.SetTable("demo1")
 	var sqlStore stores.Store = sql
-	r := &ReportDemo{
+	r := &Demo1{
 		Name:    "n1",
 		Content: "n1",
 	}
@@ -44,35 +44,40 @@ func Test_IStore(t *testing.T) {
 	if r.ID != 1 {
 		t.Fatalf("write new fail")
 	}
-	rr := []*ReportDemo{}
-	_ = sqlStore.ReadAll(&rr)
-	// check(err)
+	rr := []*Demo1{}
+	err = sqlStore.ReadAll(&rr)
+	check(err)
 	if len(rr) <= 0 {
 		t.Fatal("list fail")
 	}
-	nr := &ReportDemo{}
-	_ = sqlStore.Read("1", nr)
+	nr := &Demo1{}
+	err = sqlStore.Read("1", nr)
+	check(err)
 	if nr.ID != 1 || nr.Name != "n1" || nr.Content != "n1" {
 		t.Fatal("get fail")
 	}
 	nr.Content = "new"
 	nr.Name = "new"
 	_ = sqlStore.Write(strconv.FormatInt(nr.ID, 10), nr)
-	nnr := &ReportDemo{}
-	_ = sqlStore.Read("1", nnr)
+	nnr := &Demo1{}
+	err = sqlStore.Read("1", nnr)
+	check(err)
 	if nnr.ID != 1 || nnr.Name != "new" || nnr.Content != "new" {
 		t.Fatal("update fail")
 	}
 	var sqlQueryer stores.Queryer = sql
-	li := []*ReportDemo{}
-	_ = sqlQueryer.Find("select id,name from report_demo where name='new'", &li)
+	li := []*Demo1{}
+	err = sqlQueryer.Find("select id,name from demo1 where name='new'", &li)
+	check(err)
 	if len(li) != 1 {
 		t.Fatal("find fail")
 	}
-	err = sqlStore.Write("1", nil)
+	var d *Demo1
+	err = sqlStore.Write("1", d)
 	check(err)
-	nrr := []*ReportDemo{}
-	_ = sqlStore.ReadAll(&nrr)
+	nrr := []*Demo1{}
+	err = sqlStore.ReadAll(&nrr)
+	check(err)
 	if len(nrr) != 0 {
 		t.Fatal("delete fail")
 	}

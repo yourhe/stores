@@ -1,31 +1,32 @@
 package sql2
 
 import (
+	"fmt"
 	"reflect"
-
-	"database/sql"
-	"errors"
 	"strconv"
 	"strings"
+
+	"database/sql"
 
 	_ "github.com/go-sql-driver/mysql"
 	// "github.com/jmoiron/sqlx"
 )
 
 type Backend interface {
-	Create(interface{}) (int64, error)
+	Insert(interface{}) (int64, error)
 	Get(int64, interface{}) error
-	Delete(int64) error
+	Delete(int64, interface{}) error
 	List(interface{}) error
 	Update(int64, interface{}) error
+}
+
+type Builder interface {
+	Migrate(interface{}) error
 }
 
 type DB struct {
 	*sql.DB
 }
-
-// var NotStructPointerErr = errors.New("输入对象必须是结构体指针")
-// var NotStructPointerSliceErr = errors.New("输入对象必须是结构体指针数组指针")
 
 func NewDB(sqlType string, conn string) (*DB, error) {
 	db, err := sql.Open(sqlType, conn)
@@ -38,24 +39,43 @@ func NewDB(sqlType string, conn string) (*DB, error) {
 	return &DB{db}, nil
 }
 
+type StructFieldFilter func(reflect.StructField) bool
+type StructFieldMapper func(reflect.StructField) string
+
+var (
+	DefaultFieldFilter = func(reflect.StructField) bool { return true }
+	DefaultFieldMapper = func(f reflect.StructField) string { return strings.ToLower(f.Name) }
+	ProtoFieldFilter   = func(f reflect.StructField) bool {
+		if f.Tag.Get("json") != "-" {
+			return true
+		}
+		return false
+	}
+)
+
 type SqlBackend struct {
-	DB    *DB
-	table string
-	pk    string
+	DB          *DB
+	table       string
+	pk          string
+	fieldFilter StructFieldFilter
+	fieldMapper StructFieldMapper
 }
 
-//func NewSqlBackend(db *sqlx.DB) error{
 func NewSqlBackend(db *DB) (*SqlBackend, error) {
 	sql := &SqlBackend{
 		DB: db,
 	}
+	sql.SetFieldMapper(DefaultFieldMapper)
+	sql.SetFieldFilter(DefaultFieldFilter)
 	return sql, nil
 }
 
-func (s *SqlBackend) SetTable(name string) {
-	if s.table == "" {
-		s.table = name
-	}
+func (s *SqlBackend) SetFieldFilter(fn StructFieldFilter) {
+	s.fieldFilter = fn
+}
+
+func (s *SqlBackend) SetFieldMapper(fn StructFieldMapper) {
+	s.fieldMapper = fn
 }
 
 func (s *SqlBackend) SetPKField(name string) {
@@ -64,35 +84,27 @@ func (s *SqlBackend) SetPKField(name string) {
 	}
 }
 
-func (s *SqlBackend) IsReady() error {
-	//TODO:检查连接是否正常，表名，主键值是否设置
+func (s *SqlBackend) SetTable(name string) {
 	if s.table == "" {
-		return errors.New("SQL ERROR: Table not set")
+		s.table = name
 	}
-	if s.pk == "" {
-		return errors.New("SQL ERROR: PKField not set")
-	}
+}
+
+func (s *SqlBackend) Migrate(model interface{}) error {
+	//TODO:
+	//若表不存在，则创建表
+	//若表存在修改，则修改表(预计只能增加字段)
 	return nil
 }
 
-func (s *SqlBackend) IsPK(key string) bool {
-	return strings.ToLower(key) == strings.ToLower(s.pk)
-}
-
-// Insert 插入对象，model参数必须是结构体指针，如 &Sth{}
 func (s *SqlBackend) Insert(model interface{}) (int64, error) {
-	if err := s.IsReady(); err != nil {
-		return 0, err
-	}
-	modelType := reflect.TypeOf(model).Elem()
-	dest := reflect.Indirect(reflect.ValueOf(model))
-	fnames := ExtractFieldsNames(modelType)
-	fnames = FilterStrings(fnames, func(f string) bool {
-		return !s.IsPK(f)
-	})
-	args := ValuesByFields(dest, fnames)
-	query := BuildInsertSQL(s.table, MapStrings(fnames, strings.ToLower))
-	res, err := s.DB.Exec(query, args...)
+	t := reflect.TypeOf(model).Elem()
+	v := reflect.Indirect(reflect.ValueOf(model))
+	ff := StructFields(t, s.Filter("Insert"))
+	fmt.Println(ff)
+	vv := FieldsValues(v, ff)
+	query := s.Sql("Insert", s.TableName(t.Name()), ff)
+	res, err := s.DB.Exec(query, vv...)
 	if err != nil {
 		return 0, err
 	}
@@ -103,71 +115,45 @@ func (s *SqlBackend) Insert(model interface{}) (int64, error) {
 	return id, nil
 }
 
-// Update 修改对象，model参数必须是结构体指针，如 &Sth{}
-func (s *SqlBackend) Update(id int64, model interface{}) error {
-	if err := s.IsReady(); err != nil {
-		return err
-	}
-	modelType := reflect.TypeOf(model).Elem()
-	dest := reflect.Indirect(reflect.ValueOf(model))
-	fnames := ExtractFieldsNames(modelType)
-	fnames = FilterStrings(fnames, func(f string) bool {
-		return !s.IsPK(f)
-	})
-	args := ValuesByFields(dest, fnames)
-	query := BuildUpdateSQL(s.table, MapStrings(fnames, strings.ToLower)) + " where " + s.pk + "=" + strconv.FormatInt(id, 10)
-	_, err := s.DB.Exec(query, args...)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// Get 获取对象，model参数是结构体指针，如 &Sth{}
 func (s *SqlBackend) Get(key int64, model interface{}) error {
-	if err := s.IsReady(); err != nil {
-		return err
-	}
-	modelType := reflect.TypeOf(model).Elem()
-	dest := reflect.Indirect(reflect.ValueOf(model))
-	fnames := ExtractFieldsNames(modelType)
-	outs := PointersByFields(dest, fnames)
-	query := BuildSelectSQL(s.table, MapStrings(fnames, strings.ToLower)) + " where " + s.pk + " = ?"
-	err := s.DB.QueryRow(query, key).Scan(outs...)
+	t := reflect.TypeOf(model).Elem()
+	v := reflect.Indirect(reflect.ValueOf(model))
+	ff := StructFields(t, s.Filter("Get"))
+	vv := FieldsPointers(v, ff)
+	query := s.Sql("Get", s.TableName(t.Name()), ff) + " where " + s.IdCond(key)
+	err := s.DB.QueryRow(query).Scan(vv...)
 	return err
 }
 
-// Delete 删除对象
-func (s *SqlBackend) Delete(key int64) error {
-	if err := s.IsReady(); err != nil {
-		return err
-	}
-	_, err := s.DB.Exec("DELETE FROM "+s.table+" where id=?", key)
-	if err != nil {
-		return err
-	}
-	return nil
+func (s *SqlBackend) Update(key int64, model interface{}) error {
+	t := reflect.TypeOf(model).Elem()
+	v := reflect.Indirect(reflect.ValueOf(model))
+	ff := StructFields(t, s.Filter("Update"))
+	vv := FieldsValues(v, ff)
+	query := s.Sql("Update", s.TableName(t.Name()), ff) + " where " + s.IdCond(key)
+	_, err := s.DB.Exec(query, vv...)
+	return err
 }
 
-// List 获取对象集合，list参数必须是结构体指针切片指针，如 &[]*Sth{}
+func (s *SqlBackend) IdCond(id int64) string {
+	return s.pk + "=" + strconv.FormatInt(id, 10)
+}
+
 func (s *SqlBackend) List(list interface{}) error {
-	if err := s.IsReady(); err != nil {
-		return err
-	}
-	dest := reflect.ValueOf(list).Elem()                   //切片值(非指针)
-	modelType := reflect.TypeOf(list).Elem().Elem().Elem() //切片成员类型(非指针)
-	fnames := ExtractFieldsNames(modelType)
-	query := BuildSelectSQL(s.table, MapStrings(fnames, strings.ToLower))
+	lv := reflect.ValueOf(list).Elem()             //切片值(非指针)
+	t := reflect.TypeOf(list).Elem().Elem().Elem() //切片成员类型(非指针)
+	ff := StructFields(t, s.Filter("List"))
+	query := s.Sql("List", s.TableName(t.Name()), ff)
 	rows, err := s.DB.Query(query)
 	defer rows.Close()
 	for rows.Next() {
-		vptr := reflect.New(modelType)
-		outs := PointersByFields(reflect.Indirect(vptr), fnames)
-		err := rows.Scan(outs...)
+		vptr := reflect.New(t)
+		vv := FieldsPointers(reflect.Indirect(vptr), ff)
+		err := rows.Scan(vv...)
 		if err != nil {
 			return err
 		}
-		dest.Set(reflect.Append(dest, vptr))
+		lv.Set(reflect.Append(lv, vptr))
 	}
 	if err != nil {
 		return err
@@ -175,66 +161,109 @@ func (s *SqlBackend) List(list interface{}) error {
 	return nil
 }
 
-func BuildInsertSQL(table string, fields []string) string {
-	stubs := MapStrings(fields, func(string) string {
-		//生成占位符
-		return "?"
-	})
-	fs := "(" + strings.Join(fields, ",") + ")"
-	vs := "(" + strings.Join(stubs, ",") + ")"
-	return "INSERT INTO " + table + " " + fs + " VALUES " + vs
+func (s *SqlBackend) Delete(key int64, model interface{}) error {
+	t := reflect.TypeOf(model).Elem()
+	query := s.Sql("Delete", s.TableName(t.Name()), nil) + " where " + s.IdCond(key)
+	_, err := s.DB.Exec(query)
+	return err
 }
 
-func BuildUpdateSQL(table string, fields []string) string {
-	stubs := MapStrings(fields, func(f string) string {
-		return f + "=?"
-	})
-	return "UPDATE " + table + " SET " + strings.Join(stubs, ",")
+func (s *SqlBackend) TableFieldsNames(fields []reflect.StructField) []string {
+	fnames := make([]string, len(fields))
+	for i, f := range fields {
+		fnames[i] = s.fieldMapper(f)
+	}
+	return fnames
 }
 
-func BuildSelectSQL(table string, fields []string) string {
-	fs := strings.Join(fields, ",")
-	return "select " + fs + " from " + table
+func (s *SqlBackend) TableName(modelName string) string {
+	if s.table == "" {
+		return modelName
+	}
+	return s.table
 }
 
-func ExtractFieldsNames(t reflect.Type) []string {
-	ff := []string{}
+func (s *SqlBackend) Sql(t string, table string, fields []reflect.StructField) string {
+	switch t {
+	case "List", "Get":
+		fnames := s.TableFieldsNames(fields)
+		return "SELECT " + strings.Join(fnames, ",") + " FROM " + table
+
+	case "Insert":
+		fnames := s.TableFieldsNames(fields)
+		fs := "(" + strings.Join(fnames, ",") + ")"
+		vs := "(" + strings.Join(FieldsStubs(fnames), ",") + ")"
+		return "INSERT INTO " + table + " " + fs + " VALUES " + vs
+
+	case "Update":
+		fnames := s.TableFieldsNames(fields)
+		stubs := MapStrings(fnames, func(f string) string {
+			return f + "=?"
+		})
+		return "UPDATE " + table + " SET " + strings.Join(stubs, ",")
+
+	case "Delete":
+		return "DELETE FROM " + table
+	}
+	return ""
+}
+
+func (s *SqlBackend) Filter(t string) StructFieldFilter {
+	//t : List Get Insert Update
+	switch t {
+	case "List", "Get":
+		return s.fieldFilter
+	case "Insert", "Update":
+		return func(f reflect.StructField) bool {
+			isPk := false
+			if f.Name == s.pk {
+				isPk = true
+			}
+			return s.fieldFilter(f) && !isPk
+		}
+	}
+	return DefaultFieldFilter
+}
+
+func StructFields(t reflect.Type, need StructFieldFilter) []reflect.StructField {
+	ff := []reflect.StructField{}
 	for i := 0; i < t.NumField(); i++ {
-		ff = append(ff, t.Field(i).Name)
+		f := t.Field(i)
+		if need(f) {
+			ff = append(ff, f)
+		}
 	}
 	return ff
 }
 
-func FilterStrings(ss []string, match func(string) bool) []string {
-	nss := []string{}
-	for _, s := range ss {
-		if match(s) {
-			nss = append(nss, s)
-		}
+func FieldsValues(v reflect.Value, fnames []reflect.StructField) []interface{} {
+	vv := []interface{}{}
+	for _, f := range fnames {
+		vv = append(vv, v.FieldByName(f.Name).Interface())
 	}
-	return nss
+	return vv
+}
+
+func FieldsPointers(v reflect.Value, fnames []reflect.StructField) []interface{} {
+	vv := []interface{}{}
+	for _, f := range fnames {
+		vv = append(vv, v.FieldByName(f.Name).Addr().Interface())
+	}
+	return vv
+}
+
+func FieldsStubs(fnames []string) []string {
+	stubs := make([]string, len(fnames))
+	for i := range fnames {
+		stubs[i] = "?"
+	}
+	return stubs
 }
 
 func MapStrings(ss []string, mapper func(string) string) []string {
-	nss := []string{}
-	for _, s := range ss {
-		nss = append(nss, mapper(s))
+	nss := make([]string, len(ss))
+	for i, s := range ss {
+		nss[i] = mapper(s)
 	}
 	return nss
-}
-
-func ValuesByFields(v reflect.Value, fields []string) []interface{} {
-	vv := []interface{}{}
-	for _, f := range fields {
-		vv = append(vv, v.FieldByName(f).Interface())
-	}
-	return vv
-}
-
-func PointersByFields(v reflect.Value, fields []string) []interface{} {
-	vv := []interface{}{}
-	for _, f := range fields {
-		vv = append(vv, v.FieldByName(f).Addr().Interface())
-	}
-	return vv
 }

@@ -11,10 +11,10 @@ import (
 )
 
 func (s *SqlBackend) Write(key string, model interface{}) error {
-	if model == nil && key != "" {
+	if reflect.ValueOf(model).IsNil() && key != "" {
 		//删除
 		id, _ := strconv.ParseInt(key, 10, 64)
-		return s.Delete(id)
+		return s.Delete(id, model)
 	}
 	if key == "" && model != nil {
 		id, err := s.Insert(model)
@@ -65,24 +65,17 @@ func (s *SqlBackend) Query(query string, args ...interface{}) (*sql.Rows, error)
 }
 
 func (s *SqlBackend) Find(q interface{}, to interface{}) error {
-	if err := s.IsReady(); err != nil {
-		return err
-	}
 	query := reflect.ValueOf(q).Interface().(string)
 	dest := reflect.ValueOf(to).Elem()                   //切片值(非指针)
 	modelType := reflect.TypeOf(to).Elem().Elem().Elem() //切片成员类型(非指针)
-	fnames := ExtractFieldsNames(modelType)
 	rows, err := s.DB.Query(query)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	cols, err := rows.Columns()
-	if err != nil {
-		return err
-	}
-	fnames = FilterStrings(fnames, func(f string) bool {
-		_f := strings.ToLower(f)
+	ff := StructFields(modelType, func(f reflect.StructField) bool {
+		_f := s.fieldMapper(f)
 		for _, c := range cols {
 			if c == _f {
 				return true
@@ -90,9 +83,12 @@ func (s *SqlBackend) Find(q interface{}, to interface{}) error {
 		}
 		return false
 	})
+	if err != nil {
+		return err
+	}
 	for rows.Next() {
 		vptr := reflect.New(modelType)
-		outs := PointersByFields(reflect.Indirect(vptr), fnames)
+		outs := FieldsPointers(reflect.Indirect(vptr), ff)
 		err := rows.Scan(outs...)
 		if err != nil {
 			return err
