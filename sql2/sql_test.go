@@ -3,6 +3,7 @@ package sql2
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -23,10 +24,11 @@ const CREATE_DEMO1_SQL = `
 const DROP_DEMO1_SQL = `DROP TABLE demo1;`
 
 type Demo2 struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
-	XXX     string `json:"-"`
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"create_at"`
+	XXX       string    `json:"-"`
 }
 
 const CREATE_DEMO2_SQL = `
@@ -34,6 +36,7 @@ CREATE TABLE demo2 (
 	ID INT NOT NULL AUTO_INCREMENT,
 	Name VARCHAR(100) NULL,
 	Content TEXT NULL,
+	CreatedAt DATETIME NULL,
 	PRIMARY KEY (ID));
 `
 const DROP_DEMO2_SQL = `DROP TABLE Demo2;`
@@ -101,8 +104,9 @@ func Test_withProtoFilter(t *testing.T) {
 	sql.SetPKField("ID")
 	sql.SetFieldFilter(ProtoFieldFilter)
 	r := &Demo2{
-		Name:    "n1",
-		Content: "n1",
+		Name:      "n1",
+		Content:   "n1",
+		CreatedAt: time.Now(),
 	}
 	id, err := sql.Insert(r)
 	check(err)
@@ -123,6 +127,7 @@ func Test_withProtoFilter(t *testing.T) {
 	}
 	nr.Content = "new"
 	nr.Name = "new"
+	nr.CreatedAt = time.Now()
 	err = sql.Update(1, nr)
 	check(err)
 	nnr := &Demo2{}
