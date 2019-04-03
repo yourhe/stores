@@ -236,17 +236,17 @@ func StructFields(t reflect.Type, need StructFieldFilter) []reflect.StructField 
 	return ff
 }
 
-func FieldsValues(v reflect.Value, fnames []reflect.StructField) []interface{} {
+func FieldsValues(v reflect.Value, fields []reflect.StructField) []interface{} {
 	vv := []interface{}{}
-	for _, f := range fnames {
+	for _, f := range fields {
 		vv = append(vv, v.FieldByName(f.Name).Interface())
 	}
 	return vv
 }
 
-func FieldsPointers(v reflect.Value, fnames []reflect.StructField) []interface{} {
+func FieldsPointers(v reflect.Value, fields []reflect.StructField) []interface{} {
 	vv := []interface{}{}
-	for _, f := range fnames {
+	for _, f := range fields {
 		vv = append(vv, v.FieldByName(f.Name).Addr().Interface())
 	}
 	return vv
