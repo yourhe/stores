@@ -119,9 +119,9 @@ func (s *SqlBackend) Get(key int64, model interface{}) error {
 	t := reflect.TypeOf(model).Elem()
 	v := reflect.Indirect(reflect.ValueOf(model))
 	ff := StructFields(t, s.Filter("Get"))
-	vv := FieldsPointers(v, ff)
+	ptrs := FieldsPointers(v, ff)
 	query := s.Sql("Get", s.TableName(t.Name()), ff) + " where " + s.IdCond(key)
-	err := s.DB.QueryRow(query).Scan(vv...)
+	err := s.DB.QueryRow(query).Scan(ptrs...)
 	return err
 }
 
@@ -148,8 +148,8 @@ func (s *SqlBackend) List(list interface{}) error {
 	defer rows.Close()
 	for rows.Next() {
 		vptr := reflect.New(t)
-		vv := FieldsPointers(reflect.Indirect(vptr), ff)
-		err := rows.Scan(vv...)
+		ptrs := FieldsPointers(reflect.Indirect(vptr), ff)
+		err := rows.Scan(ptrs...)
 		if err != nil {
 			return err
 		}

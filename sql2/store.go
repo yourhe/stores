@@ -88,8 +88,8 @@ func (s *SqlBackend) Find(q interface{}, to interface{}) error {
 	}
 	for rows.Next() {
 		vptr := reflect.New(modelType)
-		outs := FieldsPointers(reflect.Indirect(vptr), ff)
-		err := rows.Scan(outs...)
+		ptrs := FieldsPointers(reflect.Indirect(vptr), ff)
+		err := rows.Scan(ptrs...)
 		if err != nil {
 			return err
 		}
