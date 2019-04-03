@@ -44,7 +44,8 @@ type StructFieldMapper func(reflect.StructField) string
 
 var (
 	DefaultFieldFilter = func(reflect.StructField) bool { return true }
-	DefaultFieldMapper = func(f reflect.StructField) string { return strings.ToLower(f.Name) }
+	DefaultFieldMapper = func(f reflect.StructField) string { return f.Name }
+	LowerFieldMapper   = func(f reflect.StructField) string { return strings.ToLower(f.Name) }
 	ProtoFieldFilter   = func(f reflect.StructField) bool {
 		if f.Tag.Get("json") != "-" {
 			return true
@@ -222,7 +223,7 @@ func (s *SqlBackend) Filter(t string) StructFieldFilter {
 			return s.fieldFilter(f) && !isPk
 		}
 	}
-	return DefaultFieldFilter
+	return s.fieldFilter
 }
 
 func StructFields(t reflect.Type, need StructFieldFilter) []reflect.StructField {

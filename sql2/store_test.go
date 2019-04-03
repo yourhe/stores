@@ -34,6 +34,7 @@ func Test_IStore(t *testing.T) {
 	defer sqlEx.Exec(DROP_DEMO1_SQL)
 	sql.SetPKField("id")
 	sql.SetTable("demo1")
+	sql.SetFieldMapper(LowerFieldMapper)
 	var sqlStore stores.Store = sql
 	r := &Demo1{
 		Name:    "n1",

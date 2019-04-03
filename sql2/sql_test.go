@@ -31,10 +31,10 @@ type Demo2 struct {
 
 const CREATE_DEMO2_SQL = `
 CREATE TABLE demo2 (
-	id INT NOT NULL AUTO_INCREMENT,
-	name VARCHAR(100) NULL,
-	content TEXT NULL,
-	PRIMARY KEY (id));
+	ID INT NOT NULL AUTO_INCREMENT,
+	Name VARCHAR(100) NULL,
+	Content TEXT NULL,
+	PRIMARY KEY (ID));
 `
 const DROP_DEMO2_SQL = `DROP TABLE Demo2;`
 
@@ -48,9 +48,9 @@ func Test_Curd(t *testing.T) {
 	defer db.Exec(DROP_DEMO1_SQL)
 
 	sql, _ := NewSqlBackend(db)
+	sql.SetFieldMapper(LowerFieldMapper)
 	sql.SetPKField("id")
 	sql.SetTable("demo1")
-
 	r := &Demo1{
 		Name:    "n1",
 		Content: "n1",
@@ -98,7 +98,7 @@ func Test_withProtoFilter(t *testing.T) {
 	defer db.Exec(DROP_DEMO2_SQL)
 
 	sql, _ := NewSqlBackend(db)
-	sql.SetPKField("id")
+	sql.SetPKField("ID")
 	sql.SetFieldFilter(ProtoFieldFilter)
 	r := &Demo2{
 		Name:    "n1",
