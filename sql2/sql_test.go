@@ -33,11 +33,11 @@ type Demo2 struct {
 
 const CREATE_DEMO2_SQL = `
 CREATE TABLE demo2 (
-	ID INT NOT NULL AUTO_INCREMENT,
+	ID INT AUTO_INCREMENT PRIMARY KEY,
 	Name VARCHAR(100) NULL,
 	Content TEXT NULL,
-	CreatedAt DATETIME NULL,
-	PRIMARY KEY (ID));
+	CreatedAt DATETIME NULL
+)
 `
 const DROP_DEMO2_SQL = `DROP TABLE Demo2;`
 
@@ -46,14 +46,17 @@ func Test_Curd(t *testing.T) {
 	err := godotenv.Load("../.env")
 	check(err)
 	db, _ := NewDB(os.Getenv("SQL_TYPE"), os.Getenv("SQL_CONNECTION"))
-	_, err = db.Exec(CREATE_DEMO1_SQL)
-	check(err)
-	defer db.Exec(DROP_DEMO1_SQL)
+	// _, err = db.Exec(CREATE_DEMO1_SQL)
+	// check(err)
+	// defer db.Exec(DROP_DEMO1_SQL)
 
 	sql, _ := NewSqlBackend(db)
 	sql.SetFieldMapper(LowerFieldMapper)
 	sql.SetPKField("id")
 	sql.SetTable("demo1")
+	err = sql.Migrate(&Demo1{})
+	check(err)
+	defer sql.Drop(&Demo1{})
 	r := &Demo1{
 		Name:    "n1",
 		Content: "n1",
@@ -96,13 +99,16 @@ func Test_withProtoFilter(t *testing.T) {
 	err := godotenv.Load("../.env")
 	check(err)
 	db, _ := NewDB(os.Getenv("SQL_TYPE"), os.Getenv("SQL_CONNECTION"))
-	_, err = db.Exec(CREATE_DEMO2_SQL)
-	check(err)
-	defer db.Exec(DROP_DEMO2_SQL)
+	// _, err = db.Exec(CREATE_DEMO2_SQL)
+	// check(err)
+	// defer db.Exec(DROP_DEMO2_SQL)
 
 	sql, _ := NewSqlBackend(db)
 	sql.SetPKField("ID")
 	sql.SetFieldFilter(ProtoFieldFilter)
+	err = sql.Migrate(&Demo2{})
+	check(err)
+	defer sql.Drop(&Demo2{})
 	r := &Demo2{
 		Name:      "n1",
 		Content:   "n1",
@@ -145,6 +151,55 @@ func Test_withProtoFilter(t *testing.T) {
 	if len(nrr) != 0 {
 		t.Fatal("delete fail")
 	}
+}
+
+type Demo3 struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"create_at"`
+	XXX       string    `json:"-"`
+}
+
+const CREATE_DEMO3_SQL = `
+CREATE TABLE demo3 (
+	ID INT AUTO_INCREMENT PRIMARY KEY,
+	Name VARCHAR(100) NULL,
+	Content TEXT NULL
+)`
+
+func Test_Migration(t *testing.T) {
+	check := CheckErrFunc(t)
+	err := godotenv.Load("../.env")
+	check(err)
+	db, _ := NewDB(os.Getenv("SQL_TYPE"), os.Getenv("SQL_CONNECTION"))
+	sql, _ := NewSqlBackend(db)
+	sql.SetPKField("ID")
+	sql.SetFieldFilter(ProtoFieldFilter)
+	exist, err := sql.Exist(&Demo3{})
+	check(err)
+	if exist == true {
+		t.Fatal("exist fail")
+	}
+	err = sql.Migrate(&Demo3{})
+	check(err)
+	exist, err = sql.Exist(&Demo3{})
+	if exist == false {
+		t.Fatal("migrate fail")
+	}
+	err = sql.Drop(&Demo3{})
+	check(err)
+	sql.DB.Exec(CREATE_DEMO3_SQL)
+	defer sql.Drop(&Demo3{})
+	err = sql.Migrate(&Demo3{})
+	check(err)
+	_, err = sql.Insert(&Demo3{
+		Name:      "n1",
+		Content:   "n1",
+		CreatedAt: time.Now(),
+	})
+	check(err)
+
 }
 
 func CheckErrFunc(t *testing.T) func(error) {
