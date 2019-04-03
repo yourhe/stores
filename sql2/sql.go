@@ -156,8 +156,10 @@ func (s *SqlBackend) Alter(model interface{}) error {
 		}
 		return s.fieldFilter(f) && notExist
 	})
+	if len(ff) == 0 {
+		return nil
+	}
 	sql := s.Sql("AlterTable", table, ff)
-	fmt.Println(sql)
 	_, err = s.DB.Exec(sql)
 	return err
 }
