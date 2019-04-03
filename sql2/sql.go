@@ -95,14 +95,96 @@ func (s *SqlBackend) Migrate(model interface{}) error {
 	//TODO:
 	//若表不存在，则创建表
 	//若表存在修改，则修改表(预计只能增加字段)
+	if exist, _ := s.Exist(model); !exist {
+		err := s.Create(model)
+		return err
+	}
+	err := s.Alter(model)
+	if err != nil {
+		return nil
+	}
 	return nil
+}
+
+func (s *SqlBackend) Drop(model interface{}) error {
+	t := reflect.TypeOf(model).Elem()
+	table := s.TableName(t.Name())
+	drop := fmt.Sprintf("DROP TABLE %s;", table)
+	_, err := s.DB.Exec(drop)
+	return err
+}
+
+func (s *SqlBackend) Exist(model interface{}) (bool, error) {
+	t := reflect.TypeOf(model).Elem()
+	table := s.TableName(t.Name())
+	exist := false
+	q := fmt.Sprintf("SELECT table_name FROM information_schema.TABLES WHERE table_name ='%s';", table)
+	rows, err := s.DB.Query(q)
+	if err != nil {
+		return exist, err
+	}
+	for rows.Next() {
+		exist = true
+		break
+	}
+	return exist, err
+}
+
+func (s *SqlBackend) Create(model interface{}) error {
+	t := reflect.TypeOf(model).Elem()
+	ff := StructFields(t, s.Filter("CreateTable"))
+	sql := s.Sql("CreateTable", s.TableName(t.Name()), ff)
+	_, err := s.DB.Exec(sql)
+	return err
+}
+
+//暂时只增加不存在的字段
+func (s *SqlBackend) Alter(model interface{}) error {
+	t := reflect.TypeOf(model).Elem()
+	table := s.TableName(t.Name())
+	cols, err := s.getTableColumn(table)
+	if err != nil {
+		return err
+	}
+	ff := StructFields(t, func(f reflect.StructField) bool {
+		name := s.fieldMapper(f)
+		notExist := true
+		for _, c := range cols {
+			if c == name {
+				notExist = false
+			}
+		}
+		return s.fieldFilter(f) && notExist
+	})
+	sql := s.Sql("AlterTable", table, ff)
+	fmt.Println(sql)
+	_, err = s.DB.Exec(sql)
+	return err
+}
+
+func (s *SqlBackend) getTableColumn(table string) ([]string, error) {
+	colsql := fmt.Sprintf("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='%s'", table)
+	rows, err := s.DB.Query(colsql)
+	if err != nil {
+		return nil, nil
+	}
+	defer rows.Close()
+	cols := []string{}
+	for rows.Next() {
+		var col string
+		err = rows.Scan(&col)
+		if err != nil {
+			return nil, err
+		}
+		cols = append(cols, col)
+	}
+	return cols, nil
 }
 
 func (s *SqlBackend) Insert(model interface{}) (int64, error) {
 	t := reflect.TypeOf(model).Elem()
 	v := reflect.Indirect(reflect.ValueOf(model))
 	ff := StructFields(t, s.Filter("Insert"))
-	fmt.Println(ff)
 	vv := FieldsValues(v, ff)
 	query := s.Sql("Insert", s.TableName(t.Name()), ff)
 	res, err := s.DB.Exec(query, vv...)
@@ -177,6 +259,41 @@ func (s *SqlBackend) TableFieldsNames(fields []reflect.StructField) []string {
 	return fnames
 }
 
+// CREATE TABLE demo2 (
+// 	ID INT AUTO_INCREMENT PRIMARY KEY,
+// 	Name VARCHAR(100) NULL,
+// 	Content TEXT NULL,
+// 	CreatedAt DATETIME NULL
+// )
+// `
+
+func (s *SqlBackend) TableFieldDefinition(field reflect.StructField) string {
+	name := s.fieldMapper(field)
+	def := ""
+	switch field.Type.Kind() {
+	case reflect.Bool:
+		def = "BOOLEAN"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uintptr, reflect.Int64, reflect.Uint64:
+		if name == s.pk {
+			def = "INT AUTO_INCREMENT PRIMARY KEY"
+		} else {
+			def = "INT"
+		}
+	case reflect.Float32, reflect.Float64:
+		def = "DOUBLE NULL"
+	case reflect.String:
+		def = "TEXT NULL"
+		if name == s.pk {
+			def = "TEXT PRIMARY KEY"
+		}
+	case reflect.Struct:
+		if field.Type.PkgPath() == "time" {
+			def = "DATETIME"
+		}
+	}
+	return name + " " + def
+}
+
 func (s *SqlBackend) TableName(modelName string) string {
 	if s.table == "" {
 		return modelName
@@ -192,8 +309,9 @@ func (s *SqlBackend) Sql(t string, table string, fields []reflect.StructField) s
 
 	case "Insert":
 		fnames := s.TableFieldsNames(fields)
+		stubs := MakeStubs("?", len(fields))
 		fs := "(" + strings.Join(fnames, ",") + ")"
-		vs := "(" + strings.Join(FieldsStubs(fnames), ",") + ")"
+		vs := "(" + strings.Join(stubs, ",") + ")"
 		return "INSERT INTO " + table + " " + fs + " VALUES " + vs
 
 	case "Update":
@@ -205,6 +323,18 @@ func (s *SqlBackend) Sql(t string, table string, fields []reflect.StructField) s
 
 	case "Delete":
 		return "DELETE FROM " + table
+	case "CreateTable":
+		typeDefs := make([]string, len(fields))
+		for i := range typeDefs {
+			typeDefs[i] = s.TableFieldDefinition(fields[i])
+		}
+		return "CREATE TABLE " + table + " (" + strings.Join(typeDefs, ",") + ")"
+	case "AlterTable":
+		alters := make([]string, len(fields))
+		for i := range alters {
+			alters[i] = "ADD COLUMN " + s.TableFieldDefinition(fields[i])
+		}
+		return "ALTER TABLE " + table + " " + strings.Join(alters, ",") + ";"
 	}
 	return ""
 }
@@ -212,7 +342,7 @@ func (s *SqlBackend) Sql(t string, table string, fields []reflect.StructField) s
 func (s *SqlBackend) Filter(t string) StructFieldFilter {
 	//t : List Get Insert Update
 	switch t {
-	case "List", "Get":
+	case "List", "Get", "CreateTable":
 		return s.fieldFilter
 	case "Insert", "Update":
 		return func(f reflect.StructField) bool {
@@ -253,9 +383,9 @@ func FieldsPointers(v reflect.Value, fields []reflect.StructField) []interface{}
 	return vv
 }
 
-func FieldsStubs(fnames []string) []string {
-	stubs := make([]string, len(fnames))
-	for i := range fnames {
+func MakeStubs(v string, l int) []string {
+	stubs := make([]string, l)
+	for i := 0; i < l; i++ {
 		stubs[i] = "?"
 	}
 	return stubs
