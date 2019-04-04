@@ -123,6 +123,7 @@ func (s *SqlBackend) Exist(model interface{}) (bool, error) {
 	if err != nil {
 		return exist, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		exist = true
 		break
@@ -289,6 +290,8 @@ func (s *SqlBackend) TableFieldDefinition(field reflect.StructField) string {
 			def = "TEXT PRIMARY KEY"
 		}
 	case reflect.Struct:
+		//QUESTIONS:如何满足各种struct类型的要求？proto中的timestamp如何处理(是否需要这样的兼容)？
+		//如兼容需要在db读写过程进行字段值的转换，转换方法如何定？
 		if field.Type.PkgPath() == "time" {
 			def = "DATETIME"
 		}
