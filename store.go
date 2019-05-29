@@ -24,6 +24,10 @@ type SqlExecutor interface {
 	Query(string, ...interface{}) (*sql.Rows, error)
 }
 
+type Queryer interface {
+	Find(interface{}, interface{}) error
+}
+
 var NotFoundError = errors.New("key not found")
 var NotPrtError = errors.New("输出对象必须是指针结构")
 var NotSliceError = errors.New("输出对象必须是Slice结构")
